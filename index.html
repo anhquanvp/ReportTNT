@@ -2231,6 +2231,29 @@ return raw.slice(1).map(r=>{
   return{am,bc,shift,date,vol,pct,cnt};
 }).filter(r=>r.date&&r.date.startsWith('20')&&(r.am||r.bc)&&r.vol>=0);
 }
+function ovOtlcSnap(am,bc){
+const rows=(window._OTLC?.rows||[]).filter(r=>(!am||r.am===am)&&(!bc||r.bc===bc));
+const dates=[...new Set(rows.map(r=>r.date))].sort();
+const n1=dates[dates.length-1]||'',n2=dates[dates.length-2]||'';
+const a1=otlcAgg(rows.filter(r=>r.date===n1));
+const a2=n2?otlcAgg(rows.filter(r=>r.date===n2)):{vol:0,pct:null};
+return{n1,n2,pct:a1.pct,prev:a2.pct,vol:a1.vol||0};
+}
+function ovOtlcByTinh(bc2tinh,dt,am,bc){
+const rows=(window._OTLC?.rows||[]).filter(r=>(!dt||r.date===dt)&&(!am||r.am===am)&&(!bc||r.bc===bc));
+const by={};
+rows.forEach(r=>{const t=normTinhName(bc2tinh[r.bc]||'');if(!t)return;(by[t]=by[t]||[]).push(r);});
+const out={};Object.keys(by).forEach(t=>{out[t]=otlcAgg(by[t]);});
+return out;
+}
+async function loadOntimeLCData(){
+if(window._OTLC?.rows?.length)return window._OTLC.rows;
+const {raw,src,sid}=await fetchOntimeLCRaw();
+const rows=normalizeOntimeLC(raw);
+window._OTLC=window._OTLC||{rows:[],greenThr:90,yellowThr:80};
+window._OTLC.rows=rows;window._OTLC.src=src;window._OTLC.sid=sid;
+return rows;
+}
 async function fetchOntimeLCRaw(){
 const names=['Ontime Lc','Ontime LC','Ontime_Lc','ONTIME LC'];
 let lastErr=null;
@@ -2990,8 +3013,9 @@ const ownFd=vol2>0?tra/vol2*100:null,regFd=gf?parsePct(gf[3]):null;
 // Rớt LC & Aging: mình = đếm dòng đã lọc; vùng = thủ kho gửi kèm (regionDaily)
 const RR=window._REGION_RAW||{};
 const rotDates=[...new Set((rotData||[]).map(r=>r.date))].sort();const rl=rotDates[rotDates.length-1]||'';
-const ownRot=(rotData||[]).filter(r=>r.date===rl).length;
-const regRot=(RR['Rot_LC_Raw']||{})[rl]!=null?RR['Rot_LC_Raw'][rl]:null;
+const scopeAm=window._SCOPE&&window._SCOPE.type==='am'?(window._SCOPE.am||window._SCOPE.label||''):'';
+const ownOt=ovOtlcSnap(scopeAm,'');
+const regOt=ovOtlcSnap('','');
 const AGR=(window._AGING&&window._AGING.rows)||[];const agDs=[...new Set(AGR.map(r=>r.date))].sort();const al=agDs[agDs.length-1]||'';
 const ownAg=AGR.filter(r=>r.date===al).length;
 const regAg=(RR['Backupall']||{})[al]!=null?RR['Backupall'][al]:null;
@@ -3004,7 +3028,7 @@ const rowsD=[
   {n:'ODR TTS',o:fmtP(odr.own),r:fmtP(odr.reg),v:vRate(odr.own,odr.reg,true)},
   {n:'OPR TTS',o:fmtP(opr.own),r:fmtP(opr.reg),v:vRate(opr.own,opr.reg,true)},
   {n:'FD (tỷ lệ trả)',o:ownFd==null?'—':ownFd.toFixed(2)+'%',r:regFd==null?'—':regFd.toFixed(2)+'%',v:vRate(ownFd,regFd,false)},
-  {n:'Rớt LC',o:fmt(ownRot)+' đơn',r:regRot==null?'—':fmt(regRot)+' đơn',v:vCnt(ownRot,regRot)},
+  {n:'Ontime LC',o:ownOt.pct==null?'—':ownOt.pct.toFixed(1)+'%',r:regOt.pct==null?'—':regOt.pct.toFixed(1)+'%',v:vRate(ownOt.pct,regOt.pct,true)},
   {n:'Aging > 5 ngày',o:fmt(ownAg)+' đơn',r:regAg==null?'—':fmt(regAg)+' đơn',v:vCnt(ownAg,regAg)}
 ];
 const tr=rowsD.map(x=>`<tr><td style="padding:8px 14px;font-weight:600;border-bottom:1px solid var(--border)">${x.n}</td><td style="padding:8px 14px;text-align:right;font-weight:800;border-bottom:1px solid var(--border)">${x.o}</td><td style="padding:8px 14px;text-align:right;font-weight:700;color:var(--text-sub);border-bottom:1px solid var(--border)">${x.r}</td><td style="padding:8px 14px;text-align:right;font-size:12px;border-bottom:1px solid var(--border)">${x.v}</td></tr>`).join('');
@@ -3041,8 +3065,8 @@ const oprDt=ovDatesDesc(R['OPR TTS - AM'],1)[0]||'';
 const odr=ovOntimeScoped(R['ODR TTS - AM'],odrBC,odrDt,am,bc);
 const opr=ovOntimeScoped(R['OPR TTS - AM'],oprBC,oprDt,am,bc);
 const fdTotal=ovFDRateScoped(fdAM,am),fdTTS=ovFDRateScoped(R['FD TTS theo AM'],am),fdSME=ovFDRateScoped(R['FD SME theo AM'],am),fdShopee=ovFDRateScoped(R['FD Shopee theo AM'],am);
-const rotDates=[...new Set((rotData||[]).map(r=>r.date))].sort();const rotLatest=rotDates[rotDates.length-1]||'';
-const rotTotal=(rotData||[]).filter(r=>r.date===rotLatest&&(!am||r.am===am)&&(!bc||r.bc===bc)).length;
+const otSnap=ovOtlcSnap(am,bc);
+const otCol=otSnap.pct==null?'#64748B':otSnap.pct>=90?'#16A34A':otSnap.pct>=80?'#B45309':'#DC2626';
 const dlt=(c,p)=>{const d=c-p;return{txt:d===0?'— không đổi':`${d>0?'▲':'▼'} ${Math.abs(d).toFixed(1)} điểm vs hôm trước`,col:d===0?'var(--text-sub)':d>0?'var(--green)':'var(--red)'};};
 const fdC=v=>v<=5?'var(--green)':v<=10?'var(--yellow)':'var(--red)';
 const kAttr=[
@@ -3051,7 +3075,7 @@ const kAttr=[
   {ic:'🛰️',label:'ODR TTS — Giao đúng hạn',val:odr.pct.toFixed(1)+'%',tgt:'Mục tiêu 95%',c:'#16A34A',bg:'#DCFCE7'},
   {ic:'🚀',label:'OPR TTS — Lấy đúng hạn',val:opr.pct.toFixed(1)+'%',tgt:'Mục tiêu 95%',c:'#7C3AED',bg:'#FAF5FF'},
   {ic:'↩️',label:'FD - Tỷ lệ trả hàng',val:fdTotal.toFixed(2)+'%',tgt:'',c:'#DC2626',bg:'#FEE2E2',sub:[{l:'TTS',v:fdTTS.toFixed(2)+'%',c:fdC(fdTTS)},{l:'SME',v:fdSME.toFixed(2)+'%',c:fdC(fdSME)},{l:'Shopee',v:fdShopee.toFixed(2)+'%',c:fdC(fdShopee)}]},
-  {ic:'📉',label:'Rớt LC - Chưa LC trước 24h',val:fmt(rotTotal),tgt:'Đóng báo cáo · nguồn không còn cập nhật',c:'#B45309',bg:'#FEF3C7'}
+  {ic:'⏱️',label:'Ontime LC',val:otSnap.pct!=null?otSnap.pct.toFixed(1)+'%':'—',tgt:otSnap.n1?`Ngày ${shortD(otSnap.n1)} · Vol ${fmt(otSnap.vol)} · mục tiêu 90%`:'Chưa có Ontime LC',d:otSnap.pct!=null&&otSnap.prev!=null?dlt(otSnap.pct,otSnap.prev):null,c:otCol,bg:'#DCFCE7'}
 ];
 // ===== Theo tỉnh (cột H = index 7) + Aging + Rớt LC =====
 const AG=window._AGING||{rows:[]};
@@ -3070,17 +3094,18 @@ _unstSet.forEach(b=>{
   const v=Math.round(parseFloat(r[3])||0),n=Math.round(parseFloat(r[6])||0),g=(parseFloat(r[4])||0)*100;
   const a=tinhAgg[t];a.vol+=v;a.ngtc+=n;a.ganW+=v*g;
 });
-(rotData||[]).filter(r=>r.date===rotLatest&&(!am||r.am===am)&&(!bc||r.bc===bc)).forEach(r=>{const t=normTinhName(r.tinh);if(!t)return;if(!tinhAgg[t])tinhAgg[t]={tinh:t,vol:0,ngtc:0,ganW:0,rot:0,aging:0,unstable:0};tinhAgg[t].rot++;});
+const otByT=ovOtlcByTinh(bc2tinh,otSnap.n1,am,bc);
+Object.keys(tinhAgg).forEach(t=>{tinhAgg[t].otlc=otByT[t]?.pct??null;});
 AG.rows.filter(r=>r.date===agLatest&&(!am||r.am===am)&&(!bc||r.bc===bc)).forEach(r=>{const t=normTinhName(bc2tinh[r.bc]);if(!t)return;if(!tinhAgg[t])tinhAgg[t]={tinh:t,vol:0,ngtc:0,ganW:0,rot:0,aging:0,unstable:0};tinhAgg[t].aging++;});
 const tinhList=ovTinhs().concat(Object.keys(tinhAgg).filter(t=>!ovTinhs().includes(t)));
 const tinhCards=tinhList.map(t=>{
   const a=tinhAgg[t];
   // AM xem: ẩn tỉnh không có dữ liệu của mình (đỡ rối; không tính "bất ổn" để tránh thẻ trống lạc loài)
-  if(isScopedAm()&&a.vol===0&&a.rot===0&&a.aging===0)return'';
+  if(isScopedAm()&&a.vol===0&&a.aging===0&&a.otlc==null)return'';
   const gtc=a.vol?a.ngtc/a.vol*100:0,gan=a.vol?a.ganW/a.vol:0;
   let status,scol,sbg;
-  if(a.vol===0){status='CHƯA CÓ DL';scol='#94A3B8';sbg='#F1F5F9';}
-  else if(gtc<55||a.rot>0){status='VẤN ĐỀ';scol='#DC2626';sbg='#FEE2E2';}
+  if(a.vol===0&&a.otlc==null){status='CHƯA CÓ DL';scol='#94A3B8';sbg='#F1F5F9';}
+  else if(gtc<55||(a.otlc!=null&&a.otlc<80)){status='VẤN ĐỀ';scol='#DC2626';sbg='#FEE2E2';}
   else if(gtc<70){status='THEO DÕI';scol='#B45309';sbg='#FEF3C7';}
   else{status='TỐT';scol='#16A34A';sbg='#DCFCE7';}
   const row=(lb,vl,c)=>`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #F1F3F7"><span style="color:var(--text-sub)">${lb}</span><span style="font-weight:700${c?`;color:${c}`:''}">${vl}</span></div>`;
@@ -3090,7 +3115,7 @@ const tinhCards=tinhList.map(t=>{
     ${row('% Gán giao',gan.toFixed(1)+'%',gan>=95?'var(--green)':'var(--orange)')}
     ${row('% GTC Tổng',gtc.toFixed(1)+'%',gtc>=70?'var(--green)':gtc>=55?'var(--yellow)':'var(--red)')}
     ${row('Aging > 5 ngày',fmt(a.aging)+' đơn',a.aging>0?'var(--yellow)':'var(--text-sub)')}
-    ${row('Rớt LC',fmt(a.rot)+' đơn',a.rot>0?'var(--red)':'var(--text-sub)')}
+    ${row('Ontime LC',a.otlc!=null?a.otlc.toFixed(1)+'%':'—',a.otlc==null?'var(--text-sub)':a.otlc>=90?'var(--green)':a.otlc>=80?'var(--yellow)':'var(--red)')}
     ${row('Bc bất ổn',fmt(a.unstable),a.unstable>0?'var(--red)':'var(--text-sub)')}
   </div></div>`;
 }).join('');
@@ -4794,7 +4819,10 @@ if(fdTtsP.ok)push('FD TTS',fdTtsP,fdTTS.n1,fdTTS.n2,'pct2',false);
 if(fdSmeP.ok)push('FD SME',fdSmeP,fdSME.n1,fdSME.n2,'pct2',false);
 if(fdShopP.ok)push('FD Shopee',fdShopP,fdShop.n1,fdShop.n2,'pct2',false);
 if(agP.ok)push('Aging >5N',agP,agCnt1,agCnt2,'cnt',false);
-if(rotP.ok)push('Rớt LC',rotP,rotN1,rotN2,'cnt',false);
+const otRows=window._OTLC?.rows||[];
+const otP=aiVhLatestPair(otRows.map(r=>r.date));
+const otAt=dt=>dt?otlcAgg(otRows.filter(r=>r.date===dt)).pct:null;
+if(otP.ok)push('Ontime LC',otP,otAt(otP.n1),otAt(otP.n2),'pct',true);
 if(odrP.ok)push('ODR TTS',odrP,reg(odrP.n1,'odr'),reg(odrP.n2,'odr'),'pct',true);
 if(oprP.ok)push('OPR TTS',oprP,reg(oprP.n1,'opr'),reg(oprP.n2,'opr'),'pct',true);
 if(ltkS?.n1&&ltkS?.n2)push('Leadtime KCT',{n1:ltkS.n1,n2:ltkS.n2},ltkS.total.lt,ltkS.total.lt-ltkS.total.dLt,'h',false);
@@ -4878,13 +4906,17 @@ if(agP.ok){
   });
   s+=`+....\n`;
 }
-if(rotP.ok){
-  const rotD=aiVhDeltaMain(rotN1,rotN2,'cnt',false);
-  s+=`\n- Rớt LC ${rotN1} đơn, ${rotD.delta} => ${rotD.verdict}\n`;
-  s+=`=> Các BC rớt LC bất thường:\n`;
-  aiVhBcBad(gBC,odrBC,oprBC,fdBC,rotData,agRows,rotP.n1,rotP.n2,'rot').slice(0,8).forEach(it=>{
-    const d=aiVhDelta(it.v1,it.v2,'cnt',false);
-    s+=`+ BC ${it.bc} ${Math.round(it.v1)} đơn, ${d.delta}\n`;
+const otRows=window._OTLC?.rows||[];
+const otP=aiVhLatestPair(otRows.map(r=>r.date));
+if(otP.ok){
+  const o1=otlcAgg(otRows.filter(r=>r.date===otP.n1)).pct,o2=otlcAgg(otRows.filter(r=>r.date===otP.n2)).pct;
+  const otD=aiVhDeltaMain(o1,o2,'pct',true);
+  s+=`\n• Ontime LC ${aiVhFmtVal(o1,'pct')} , ${otD.delta} => ${otD.verdict}\n`;
+  s+=`=> Các BC Ontime LC thấp:\n`;
+  const byBc={};
+  otRows.filter(r=>r.date===otP.n1&&r.bc).forEach(r=>{(byBc[r.bc]=byBc[r.bc]||[]).push(r);});
+  Object.entries(byBc).map(([bc,rs])=>({bc,pct:otlcAgg(rs).pct})).filter(x=>x.pct!=null&&x.pct<90).sort((a,b)=>a.pct-b.pct).slice(0,8).forEach(it=>{
+    s+=`+ BC ${it.bc} ${it.pct.toFixed(1)}%\n`;
   });
   s+=`+....\n`;
 }
@@ -5515,7 +5547,8 @@ await Promise.all([
   // Data_HRON cho Tổng quan + tab Định biên
   loadHRONData().catch(e=>console.warn('HRON lỗi',e&&e.message)),
   // Leadtime KCT cho Tổng quan + AI
-  loadLTKCTData().catch(e=>console.warn('LTKCT overview lỗi',e&&e.message))
+  loadLTKCTData().catch(e=>console.warn('LTKCT overview lỗi',e&&e.message)),
+  loadOntimeLCData().catch(e=>console.warn('Ontime LC overview lỗi',e&&e.message))
 ]);
 // Gắn danh sách BC bất ổn cho GTCD sau khi cả Aging + GTCD xong (tránh phụ thuộc thứ tự)
 if(window._GTCD && window._BATON?.unstable?.size) window._GTCD.unstable=window._BATON.unstable;
@@ -5525,6 +5558,7 @@ try{buildOverviewPage(R,rotData);}catch(e){document.getElementById('p0').innerHT
 // Năng suất: nạp nền (~42k dòng) rồi cập nhật Tổng quan
 loadNSData().then(()=>{if(window._curPage==='p0'&&window._lastR)try{buildOverviewPage(window._lastR,window._ROTLC||[]);}catch(_){}}).catch(e=>console.warn('NS nền lỗi',e.message));
 loadLTKCTData().then(()=>{if(window._curPage==='p0'&&window._lastR)try{buildOverviewPage(window._lastR,window._ROTLC||[]);}catch(_){}}).catch(e=>console.warn('LTKCT nền lỗi',e.message));
+loadOntimeLCData().then(()=>{if(window._curPage==='p0'&&window._lastR)try{buildOverviewPage(window._lastR,window._ROTLC||[]);}catch(_){}}).catch(e=>console.warn('Ontime LC nền lỗi',e.message));
 // p8 — GTC Bulky: lazy-load khi mở tab (sheet ~23.7k dòng)
 const p8Active=document.getElementById('p8')?.classList.contains('active');
 window._gtcdLoaded=false;
@@ -5539,7 +5573,7 @@ window._rotlcLoaded=false;
 if(p9Active){window._rotlcLoaded=true;document.getElementById('p9').innerHTML=rotLCSkeleton(rotData);renderRotLC();}
 // p14 — Ontime Luân Chuyển: lazy-load / refresh nếu đang mở
 const p14Active=document.getElementById('p14')?.classList.contains('active');
-window._otlcLoaded=false;window._OTLC={rows:[],greenThr:90,yellowThr:80};
+window._otlcLoaded=false;window._OTLC=window._OTLC||{rows:[],greenThr:90,yellowThr:80};if(!Array.isArray(window._OTLC.rows))window._OTLC.rows=[];
 if(p14Active){window._otlcLoaded=true;buildOntimeLCPage();}
 // p10/p11 — Nhân sự: lazy-load khi mở tab
 window._hronLoaded=false;window._nsLoaded=false;
