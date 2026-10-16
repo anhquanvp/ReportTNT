@@ -463,10 +463,16 @@ document.addEventListener('click',()=>document.querySelectorAll('.nav-pod.open')
 function fmt(n){return(+n||0).toLocaleString('vi-VN');}
 function isoD(d){return(d||'').match(/\d{4}-\d{2}-\d{2}/)?.[0]||'';}
 function parseSheetDate(d){
-if(!d)return'';
+if(d==null||d==='')return'';
+if(typeof d==='number'&&isFinite(d)&&d>20000&&d<80000){
+  const dt=new Date(Date.UTC(1899,11,30)+Math.round(d)*86400000);
+  return dt.getUTCFullYear()+'-'+String(dt.getUTCMonth()+1).padStart(2,'0')+'-'+String(dt.getUTCDate()).padStart(2,'0');
+}
 const s=String(d).trim();
-let m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+let m=s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/);
 if(m)return`${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+m=s.match(/Date\((\d{4})\s*,\s*(\d{1,2})\s*,\s*(\d{1,2})/i);
+if(m)return`${m[1]}-${String(+m[2]+1).padStart(2,'0')}-${m[3].padStart(2,'0')}`;
 return isoD(s);
 }
 // Parse số từ sheet: hỗ trợ VN (1.234.567,89) và decimal (546319.54)
@@ -676,6 +682,7 @@ const PROXY_URL='https://script.google.com/macros/s/AKfycbwOlHLUQJKhghZHJzv3_Ixl
 // Mail được xem TOÀN VÙNG. Mail trong EMAIL_TO_AM chỉ xem đúng AM của mình.
 // Mail @ghn.vn khác không nằm trong hai danh sách này không được mở báo cáo xem tất cả.
 const FULL_ACCESS_EMAILS=['quanpv@ghn.vn','doanhnv@ghn.vn','khiempg@ghn.vn'];
+const FULL_ACCESS_EMPS=['3006685'];
 const EMAIL_TO_AM={
   'binhpt@ghn.vn':'Phạm Tiến Bình',
   'ducbv@ghn.vn':'Bùi Việt Đức',
@@ -693,7 +700,10 @@ const EMAIL_TO_AM={
   'duypk@ghn.vn':'Phạm Khương Duy'
 };
 function _emailKey(e){return String(e||'').trim().toLowerCase();}
+function _empFromToken(st){try{const p=String(st||window._stoken||'').split('.');return (p[0]||'').trim();}catch(_){return '';}}
 function _isFullEmail(e){return FULL_ACCESS_EMAILS.includes(_emailKey(e));}
+function _isFullEmp(id){return FULL_ACCESS_EMPS.includes(String(id||'').trim());}
+function _wantFullView(){return window._ACL==='full'||_isFullEmail(window._authEmail)||_isFullEmp(_empFromToken())||_isFullEmp(window._ssoEmp);}
 function _lockAclFromEmail(email){
   const k=_emailKey(email);
   window._authEmail=email||window._authEmail||'';
@@ -711,7 +721,7 @@ function _tagScopeBar(){
   }catch(_){}
 }
 function _mergeServerScope(scope){
-  if(window._ACL==='full'||_isFullEmail(window._authEmail)){window._SCOPE=null;_tagScopeBar();return;}
+  if(_wantFullView()){window._ACL='full';window._SCOPE=null;_tagScopeBar();return;}
   if(window._ACL==='am'){
     const am=EMAIL_TO_AM[_emailKey(window._authEmail)];
     window._SCOPE={type:'am',label:am,am:am};
@@ -730,8 +740,13 @@ function _hdrIdx(header,pred){
   for(let i=0;i<H.length;i++){if(pred(H[i],i))return i;}
   return -1;
 }
+function _isLtkctSheet(rows){
+  const H=(rows&&rows[0]||[]).map(normHdr);
+  return H.some(h=>h.includes('moc gio')||h.includes('leadtime')||h.includes('total lt'));
+}
 function _filterSheetRows(rows,names,bc2am){
   if(!rows||rows.length<2||!names||!names.length)return rows;
+  if(_isLtkctSheet(rows))return rows;
   const match=v=>names.some(n=>aiAmEquals(v,n));
   const strict=window._ACL==='am';
   const idx=_hdrIdx(rows[0],h=>h==='am'||h==='am chuan'||h==='area manager');
@@ -777,7 +792,7 @@ function _applyScopeToBatch(R){
   return R;
 }
 async function _proxyRead(sheetId, sel){
-  const url=()=>PROXY_URL+'?stoken='+encodeURIComponent(window._stoken||'')+'&token='+encodeURIComponent(window._authToken||'')+'&sheetId='+encodeURIComponent(sheetId)+'&name='+encodeURIComponent(sel.name||'')+'&gid='+encodeURIComponent(sel.gid!=null?String(sel.gid):'')+(sel.days!=null?'&days='+encodeURIComponent(sel.days):'');
+  const url=()=>PROXY_URL+'?stoken='+encodeURIComponent(window._stoken||'')+'&token='+encodeURIComponent(window._authToken||'')+'&sheetId='+encodeURIComponent(sheetId)+'&name='+encodeURIComponent(sel.name||'')+'&gid='+encodeURIComponent(sel.gid!=null?String(sel.gid):'')+(sel.days!=null?'&days='+encodeURIComponent(sel.days):'')+(_wantFullView()?'&full=1&view=all&role=full':'');
   const call=async()=>{ const r=await fetch(url()); let j=null; try{ j=await r.json(); }catch(_){}; return {r,j}; };
   let {r,j}=await call();
   // Vé SSO hết hạn/lỗi → nếu đang dùng SSO thì bắt đăng nhập lại; nếu dùng Google thì thử refresh
@@ -797,7 +812,7 @@ async function _proxyRead(sheetId, sel){
 function isScopedAm(){ return !!(window._SCOPE&&window._SCOPE.type==='am'); }
 // Doc GOP nhieu tab 1 lan (giam 16 lan goi xuong 1) -> nhanh hon nhieu. Tra ve {name: rows}.
 async function _proxyReadBatch(sheetId, names){
-  const body=JSON.stringify({stoken:window._stoken||'',token:window._authToken||'',sheetId,names:JSON.stringify(names)});
+  const body=JSON.stringify({stoken:window._stoken||'',token:window._authToken||'',sheetId,names:JSON.stringify(names),full:_wantFullView()?1:0,view:_wantFullView()?'all':'',role:_wantFullView()?'full':''});
   const call=async()=>{ const r=await fetch(PROXY_URL,{method:'POST',body}); let j=null; try{j=await r.json();}catch(_){}; return {r,j}; };
   let {r,j}=await call();
   if(j&&j.error==='auth'){ if(window._stoken){ _ssoLogout('Phiên đăng nhập đã hết hạn — vui lòng đăng nhập lại.'); throw new Error('auth'); } try{await getAccessToken(false);}catch(_){}; ({r,j}=await call()); }
@@ -1642,18 +1657,48 @@ loadLTKCTData().then(rows=>{
   setTimeout(()=>renderLTKCT(),0);
 }).catch(e=>{el.innerHTML=errPage(`Leadtime KCT: ${e.message}`);});
 }
+function ltkctCol(header,keys,fallback){
+const H=(header||[]).map(normHdr);
+for(const k of keys){const i=H.findIndex(h=>h===k);if(i>=0)return i;}
+for(const k of keys){
+  const i=H.findIndex(h=>{
+    if(!h.includes(k))return false;
+    if(k==='volume'&&h!=='volume')return false;
+    if(k==='time'&&h.includes('lead'))return false;
+    return true;
+  });
+  if(i>=0)return i;
+}
+return fallback;
+}
 function parseLTKCTRows(raw){
-return(raw||[]).slice(1).filter(r=>r.length>7&&(r[2]||'').trim()).map(r=>({
-  mien:(r[0]||'').trim(),moc:(r[1]||'').trim(),date:isoD(r[2]),
-  vol:ltNum(r[3]),bc:(r[6]||'').trim(),totLT:ltNum(r[7])
-})).filter(r=>r.date&&r.bc);
+if(!raw||raw.length<2)return [];
+const H=raw[0]||[];
+const iMien=ltkctCol(H,['mien'],0);
+const iMoc=ltkctCol(H,['moc gio','moc'],1);
+const iDate=ltkctCol(H,['time','ngay','date'],2);
+const iVol=ltkctCol(H,['volume'],3);
+const iBc=ltkctCol(H,['buu cuc','kho chuyen'],6);
+const iTot=ltkctCol(H,['total lt'],7);
+const iLead=ltkctCol(H,['leadtime','lead time'],5);
+return raw.slice(1).map(r=>{
+  const date=parseSheetDate(r[iDate])||isoD(r[iDate]);
+  const bc=String(r[iBc]||'').trim();
+  const vol=parseSheetNum(r[iVol]);
+  let totLT=iTot>=0?parseSheetNum(r[iTot]):0;
+  if(!totLT&&iLead>=0)totLT=parseSheetNum(r[iLead])*vol;
+  const moc=String(r[iMoc]||'').trim()||'(không mốc)';
+  return{mien:String(r[iMien]||'').trim(),moc,date,vol,bc:bc||'(không tên kho)',totLT};
+}).filter(r=>r.date&&(r.vol||r.totLT||r.bc!=='(không tên kho)'));
 }
 async function loadLTKCTData(){
 if(window._LTKCT?.rows?.length)return window._LTKCT.rows;
-const raw=await fetchSheetByGid(LTKCT_GID);
+const raw=await _proxyRead(SID,{gid:LTKCT_GID,name:'Leadtime KCT'});
 window._LTKCT=window._LTKCT||{charts:{},selMoc:new Set(LTKCT_MOC)};
 window._LTKCT.rows=parseLTKCTRows(raw);
-if(!window._LTKCT.selMoc?.size)window._LTKCT.selMoc=new Set(LTKCT_MOC);
+const foundMoc=[...new Set(window._LTKCT.rows.map(r=>r.moc).filter(Boolean))];
+window._LTKCT.mocs=LTKCT_MOC.concat(foundMoc.filter(m=>!LTKCT_MOC.includes(m)));
+window._LTKCT.selMoc=new Set(window._LTKCT.mocs);
 return window._LTKCT.rows;
 }
 function ltkctSkeleton(rows){
@@ -1671,7 +1716,7 @@ return`<div class="page-header">
   <div><label style="display:block;margin-bottom:3px">Bưu cục (Kho chuyển tiếp)</label><select id="ltkct_bc" onchange="renderLTKCT()"><option value="">Tất cả kho</option>${bcs.map(b=>`<option value="${b.replace(/"/g,'&quot;')}">${b}</option>`).join('')}</select></div>
 </div>
 <div class="date-filter-bar" style="flex-wrap:wrap;gap:14px;border-top:none">
-  <div class="chip-row"><span class="chip-label">Mốc giờ</span>${LTKCT_MOC.map(m=>`<span class="chip active" data-moc="${m}" onclick="ltkctToggle(this)">${m}</span>`).join('')}</div>
+  <div class="chip-row"><span class="chip-label">Mốc giờ</span>${(window._LTKCT.mocs||LTKCT_MOC).map(m=>`<span class="chip active" data-moc="${m}" onclick="ltkctToggle(this)">${m}</span>`).join('')}</div>
 </div>
 <div class="kpi-grid" id="ltkct_kpi" style="grid-template-columns:repeat(5,1fr)"></div>
 <div class="chart-box"><h3>Xu hướng Leadtime theo ngày — theo Kho chuyển tiếp</h3><div class="chart-canvas-wrap"><canvas id="ltkct_chart"></canvas></div></div>
@@ -1693,7 +1738,7 @@ return G.rows.filter(r=>r.date>=lo&&r.date<=hi&&(!bc||r.bc===bc)&&G.selMoc.has(r
 }
 function ltkctMocAgg(data,dates){
 const G=window._LTKCT;
-const mocs=LTKCT_MOC.filter(m=>G.selMoc.has(m));
+const mocs=(G.mocs||LTKCT_MOC).filter(m=>G.selMoc.has(m));
 const bcs=[...new Set(data.map(r=>r.bc))].sort();
 const byMoc={};mocs.forEach(m=>{byMoc[m]={};dates.forEach(d=>byMoc[m][d]={v:0,t:0});});
 const byBC={};bcs.forEach(bc=>{byBC[bc]={};mocs.forEach(m=>{byBC[bc][m]={};dates.forEach(d=>byBC[bc][m][d]={v:0,t:0});});});
@@ -1831,7 +1876,7 @@ if(!G?.rows?.length)return'(Chưa có dữ liệu Leadtime KCT)';
 const allDates=[...new Set(G.rows.map(r=>r.date))].sort();
 const dates=allDates.slice(-(days||7));
 const data=G.rows.filter(r=>dates.includes(r.date));
-const prevSel=G.selMoc;G.selMoc=new Set(LTKCT_MOC);
+const prevSel=G.selMoc;G.selMoc=new Set(G.mocs||LTKCT_MOC);
 const {mocs,bcs,byBC,byMoc,tot}=ltkctMocAgg(data,dates);
 G.selMoc=prevSel;
 const n1=dates[dates.length-1]||'',n2=dates[dates.length-2]||'';
@@ -1864,7 +1909,7 @@ const n1=allDates[allDates.length-1]||'',n2=allDates[allDates.length-2]||'';
 if(!n1)return null;
 const dates=[n1,n2].filter(Boolean);
 const data=G.rows.filter(r=>dates.includes(r.date));
-const prevSel=G.selMoc;G.selMoc=new Set(LTKCT_MOC);
+const prevSel=G.selMoc;G.selMoc=new Set(G.mocs||LTKCT_MOC);
 const {mocs,bcs,byBC,tot}=ltkctMocAgg(data,dates);
 G.selMoc=prevSel;
 const wh=bcs.map(bc=>{
@@ -1886,7 +1931,7 @@ const ltk=ovLtkCopyDataN1N2();
 if(!ltk)return'';
 const dVolStr=(d,cur,prev)=>{if(!cur&&!prev)return'—';if(d===0)return'—';return`${d>0?'▲':'▼'} ${fmt(Math.abs(d))} (${fmt(prev)}→${fmt(cur)})`;};
 const dLtStr=(d,cur,prev)=>{if(!cur&&!prev)return'—';if(Math.abs(d)<0.01)return'—';return`${d>0?'▲':'▼'} ${Math.abs(d).toFixed(2)}h (${prev.toFixed(2)}→${cur.toFixed(2)})`;};
-let h=`<div class="card" style="margin-top:18px"><div class="card-header"><div class="card-title"><div class="card-icon" style="background:#7C3AED">⏲️</div>Leadtime KCT — Chi tiết 3 Kho</div><div class="card-info">N-1: ${shortD(s.n1)} vs N-2: ${shortD(s.n2)} · LT = Total_LT/Volume</div></div>`;
+let h=`<div class="card" style="margin-top:18px"><div class="card-header"><div class="card-title"><div class="card-icon" style="background:#7C3AED">⏲️</div>Leadtime KCT — Chi tiết ${s.warehouses.length} kho</div><div class="card-info">N-1: ${shortD(s.n1)} vs N-2: ${shortD(s.n2)} · LT = Total_LT/Volume</div></div>`;
 h+=monoCopyBox('LEADTIME KCT — COPY BÁO CÁO',ltk.headers,ltk.rows,'Càng cao càng tệ · Chi tiết: tab Leadtime KCT');
 h+=`<div class="analysis-box" style="margin:0 18px 14px">📦 <strong>Tổng mạng KCT N-1 (${shortD(s.n1)}):</strong> Volume <strong>${fmt(s.total.vol)}</strong> · Leadtime TB <strong>${s.total.lt.toFixed(2)}h</strong> (${ltkctGroupLabel(s.total.lt)}) · ΔVol ${dVolStr(s.total.dVol,s.total.vol,s.total.vol-s.total.dVol)} · ΔLT ${dLtStr(s.total.dLt,s.total.lt,s.total.lt-s.total.dLt)}</div>`;
 h+=`</div>`;
@@ -2732,7 +2777,7 @@ let nsGan=0,nsGtc=0,giaoTB=0,ngay=0,luong=0;
 });
 const G=window._LTKCT;let lt=null;
 if(G?.rows?.length){
-  const prevSel=G.selMoc;G.selMoc=new Set(LTKCT_MOC);
+  const prevSel=G.selMoc;G.selMoc=new Set(G.mocs||LTKCT_MOC);
   const {tot}=ltkctMocAgg(G.rows.filter(r=>r.date===dt),[dt]);
   G.selMoc=prevSel;
   const t=tot[dt];lt=t?.v?t.t/t.v:null;
@@ -5624,6 +5669,9 @@ async function _ssoVerify(){
 function _ssoBack(){document.getElementById('ssoStep2').style.display='none';document.getElementById('ssoStep1').style.display='block';_authSetMsg('');}
 function _ssoEnter(stoken){
   window._stoken=stoken; window._authToken=null;
+  const emp=_empFromToken(stoken);
+  if(emp)window._ssoEmp=emp;
+  if(_isFullEmp(emp)){window._ACL='full';window._SCOPE=null;window._scopeTagged=false;}
   try{localStorage.setItem('tnt_stoken',stoken);localStorage.removeItem('tnt_sso');}catch(_){}
   const g=document.getElementById('authGate'); if(g)g.style.display='none';
   initSplash(); init();
