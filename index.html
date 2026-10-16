@@ -1642,10 +1642,10 @@ window._GTCD.charts[key]=new Chart(ctx,{type:'bar',data:{labels,datasets},option
 }});
 }
 
-/* ===== LEADTIME KCT (p13) — sheet "Leadtime KCT" ===== */
-// cols: Miền(0), Mốc giờ(1), Time(2), Volume(3), %Volume(4), LeadTime(5), Bưu Cục(6), Total_LT(7), Tuần(8), Tháng(9)
+/* ===== LEADTIME KCT (p13) — tab "Leadtime KCT" trên sheet báo cáo ===== */
+// Đọc theo tên tab. Gid cũ 125700493 chỉ còn 3 kho; tab hiện tại đủ 5 kho / 1821 dòng.
+// cols: Chi tiết(0), Mốc giờ(1), Time(2), Volume(3), %Volume(4), LeadTime(5), Bưu Cục(6), Total_LT(7), Tuần(8), Tháng(9)
 // Leadtime = ΣTotal_LT(H) / ΣVolume(D)
-const LTKCT_GID='125700493';
 const LTKCT_MOC=['1.0 - 6h','2.6 - 12h','3.12 - 24h','4.>24h'];
 const LTKCT_LINEC=['#F15D29','#2563EB','#10B981','#A855F7','#EC4899','#F59E0B'];
 window._LTKCT={rows:[],charts:{},selMoc:new Set(LTKCT_MOC)};
@@ -1693,7 +1693,7 @@ return raw.slice(1).map(r=>{
 }
 async function loadLTKCTData(){
 if(window._LTKCT?.rows?.length)return window._LTKCT.rows;
-const raw=await _proxyRead(SID,{gid:LTKCT_GID,name:'Leadtime KCT'});
+const raw=await _proxyRead(SID,{name:'Leadtime KCT'});
 window._LTKCT=window._LTKCT||{charts:{},selMoc:new Set(LTKCT_MOC)};
 window._LTKCT.rows=parseLTKCTRows(raw);
 const foundMoc=[...new Set(window._LTKCT.rows.map(r=>r.moc).filter(Boolean))];
@@ -1708,7 +1708,7 @@ const dTo=allD[0]||'',dFrom=allD[Math.min(6,allD.length-1)]||'';
 const mkOpt=(arr,sv)=>arr.map(d=>`<option value="${d}"${d===sv?' selected':''}>${shortDDow(d)}</option>`).join('');
 return`<div class="page-header">
   <div class="page-title">Leadtime KCT — Kho Chuyển Tiếp</div>
-  <div class="page-meta"><span class="tag tag-orange">⏲️ Leadtime = Total_LT / Volume · theo ngày & mốc giờ</span><span>Ngày mới nhất: ${shortD(allD[0])}</span></div>
+  <div class="page-meta"><span class="tag tag-orange">⏲️ Leadtime = Total_LT / Volume · theo ngày & mốc giờ</span><span>${bcs.length} kho</span><span>Ngày mới nhất: ${shortD(allD[0])}</span></div>
 </div>
 <div class="date-filter-bar" style="flex-wrap:wrap;gap:14px">
   <div><label style="display:block;margin-bottom:3px">Từ ngày</label><select id="ltkct_from" onchange="renderLTKCT()">${mkOpt(allD,dFrom)}</select></div>
@@ -1942,7 +1942,7 @@ function ltkctBriefForAI(){
 const s=ltkctOvSummary();if(!s)return'';
 let t=`\nLeadtime KCT (${shortD(s.n1)}): TB ${s.total.lt.toFixed(2)}h, Vol ${fmt(s.total.vol)}`;
 if(s.n2)t+=`, ΔLT ${s.total.dLt>=0?'+':''}${s.total.dLt.toFixed(2)}h vs ${shortD(s.n2)}`;
-t+='\n3 Kho chuyển tiếp:';
+t+='\n'+s.warehouses.length+' kho chuyển tiếp:';
 s.warehouses.forEach(w=>{t+=`\n  ${w.bc}: LT=${w.lt.toFixed(2)}h, Vol=${fmt(w.vol)}${s.n2?`, ΔLT=${w.dLt>=0?'+':''}${w.dLt.toFixed(2)}h`:''}`;});
 return t;
 }
