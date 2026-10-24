@@ -1109,7 +1109,6 @@ const allNames=new Set();
 dData.forEach(dd=>dd.forEach(d=>Object.keys(d).forEach(n=>allNames.add(n))));
 const isGrand=n=>n.toLowerCase().includes('grand total');
 const regular=[...allNames].filter(n=>!isGrand(n));
-const grands=[...allNames].filter(n=>isGrand(n));
 const sorted=regular.sort((a,b)=>(dData[0]?.[0]?.[b]?.fd??-1)-(dData[0]?.[0]?.[a]?.fd??-1));
 const names=filterFdNames(sorted,nameLabel,filter?.am,filter?.bc);
 if(!names.length)return`<p style="padding:16px;color:var(--text-sub)">Không có dữ liệu</p>`;
@@ -1133,27 +1132,28 @@ names.forEach((name,i)=>{
   });
   h+='</tr>';
 });
-// Dòng TỔNG — Σ Trả Total / Σ %Vol (theo từng ngày & từng loại hàng)
+// Cùng một tỷ lệ cho dòng TỔNG và thẻ so sánh: Σ Trả / Σ %Vol của đúng các dòng đang hiện (đã lọc AM/BC).
+// Không dùng %FD của dòng Grand Total — số đó là mốc toàn vùng, lệch với bảng khi xem theo AM/BC.
+function fdAgg(di,si){
+  let tra=0,vol=0;
+  names.forEach(n=>{const c=dData[di]?.[si]?.[n];if(c){tra+=c.tra||0;vol+=c.vol||0;}});
+  return vol>0?tra/vol*100:null;
+}
 h+=`<tr class="tot"><td style="${cs}position:sticky;left:0;background:#FFE0CC;z-index:2"></td><td style="${cs}font-weight:800;white-space:nowrap;position:sticky;left:32px;background:#FFE0CC;z-index:2">TỔNG (Σ Trả / Σ %Vol)</td>`;
-dates.forEach((d,di)=>{labels.forEach((_,si)=>{let tra=0,vol=0;regular.forEach(n=>{const c=dData[di]?.[si]?.[n];if(c){tra+=c.tra||0;vol+=c.vol||0;}});const fd=vol>0?tra/vol*100:null;const red=fd!==null&&fd>=15;h+=`<td style="${cs}text-align:center;border-left:${si===0?'3px solid #D1D5DB':'1px solid #E5E7EB'};background:#FFE0CC;font-weight:800;color:${red?'#DC2626':'inherit'}">${fd!==null?fd.toFixed(2)+'%':'—'}</td>`;});});
+dates.forEach((d,di)=>{labels.forEach((_,si)=>{const fd=fdAgg(di,si);const red=fd!==null&&fd>=15;h+=`<td style="${cs}text-align:center;border-left:${si===0?'3px solid #D1D5DB':'1px solid #E5E7EB'};background:#FFE0CC;font-weight:800;color:${red?'#DC2626':'inherit'}">${fd!==null?fd.toFixed(2)+'%':'—'}</td>`;});});
 h+='</tr>';
 h+='</tbody></table></div>';
 if(dates.length>=2){
-  const grandKey=grands[0];
-  if(grandKey){
-  const grpLabels=[{l:'Total',si:0},{l:'SME',si:1},{l:'TTS',si:2},{l:'Shopee',si:3}];
-  h+=`<div class="analysis-box">📊 <strong>So sánh ${shortD(dates[1])} → ${shortD(dates[0])}:</strong><div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">`;
-  grpLabels.forEach(g=>{
-    const fd0=dData[0]?.[g.si]?.[grandKey]?.fd??null;
-    const fd1=dData[1]?.[g.si]?.[grandKey]?.fd??null;
-    if(fd0!==null&&fd1!==null){
-    const diff=fd0-fd1;const isUp=diff>0;
-    const color=isUp?'var(--red)':'var(--green)';const arrow=isUp?'▲':'▼';
-    h+=`<div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:8px 12px;min-width:110px;text-align:center"><div style="font-size:11px;font-weight:600;color:var(--text-sub);margin-bottom:4px">${g.l}</div><div style="font-size:14px;font-weight:700;color:${color}">${arrow} ${Math.abs(diff).toFixed(2)}%</div><div style="font-size:10px;color:var(--text-sub)">${fd1.toFixed(2)}% → ${fd0.toFixed(2)}%</div></div>`;
-    }
+  const cards=[];
+  labels.forEach((l,si)=>{
+    const fdNew=fdAgg(0,si),fdOld=fdAgg(1,si);
+    if(fdNew==null||fdOld==null)return;
+    const diff=fdNew-fdOld;const isUp=diff>0.0005;const isDown=diff<-0.0005;
+    const color=isUp?'var(--red)':isDown?'var(--green)':'var(--text-sub)';
+    const arrow=isUp?'▲':isDown?'▼':'—';
+    cards.push(`<div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:8px 12px;min-width:110px;text-align:center"><div style="font-size:11px;font-weight:600;color:var(--text-sub);margin-bottom:4px">${l}</div><div style="font-size:14px;font-weight:700;color:${color}">${arrow} ${Math.abs(diff).toFixed(2)}%</div><div style="font-size:10px;color:var(--text-sub)">${fdOld.toFixed(2)}% → ${fdNew.toFixed(2)}%</div></div>`);
   });
-  h+=`</div></div>`;
-  }
+  if(cards.length)h+=`<div class="analysis-box">📊 <strong>So sánh ${shortD(dates[1])} → ${shortD(dates[0])}:</strong><div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">${cards.join('')}</div></div>`;
 }
 return h;
 }
@@ -1211,14 +1211,24 @@ const allNames=new Set();
 parsed.forEach(p=>{if(p)p.data.forEach(r=>allNames.add(r.name));});
 const isGrand=n=>n.toLowerCase().includes('grand total');
 const regular=[...allNames].filter(n=>!isGrand(n));
-const grands=[...allNames].filter(n=>isGrand(n));
 const p0Map=wMap[0]||{};
 // Remove rows where all selected weeks have 0% FD (quit employees)
 const active=regular.filter(name=>selWeeks.some(w=>(p0Map[name]?.[w]??0)>0));
 const latestWk=selWeeks[selWeeks.length-1];
 const sorted=active.sort((a,b)=>(p0Map[b]?.[latestWk]??-1)-(p0Map[a]?.[latestWk]??-1));
 const names=filterFdNames(sorted,isBC?'Bưu Cục':'AM',filter?.am,filter?.bc);
-const fdWk=(sheet,w)=>{let tra=0,vol=0;(sheet||[]).slice(1).forEach(r=>{if((r[5]||'').trim()!==String(w))return;const nm=(r[0]||'').trim();if(!nm||nm.toLowerCase().includes('grand total'))return;tra+=parsePct(r[4]);vol+=parsePct(r[2]);});return vol>0?tra/vol*100:null;};
+// Σ Trả / Σ %Vol trên dòng ngày của tuần. Khi đang lọc AM/BC thì chỉ cộng đúng tập đang hiện, cùng nguồn với thẻ so sánh.
+const fdWk=(sheet,w)=>{
+  let tra=0,vol=0;
+  (sheet||[]).slice(1).forEach(r=>{
+    if((r[5]||'').trim()!==String(w))return;
+    const nm=(r[0]||'').trim();
+    if(!nm||isGrandRow(nm))return;
+    if((filter?.am||filter?.bc)&&!filterFdNames([nm],hLabel,filter.am,filter.bc).length)return;
+    tra+=parsePct(r[4]);vol+=parsePct(r[2]);
+  });
+  return vol>0?tra/vol*100:null;
+};
 const cs='padding:6px 9px;';
 let h=`<div class="table-wrap" style="${isBC?'max-height:1100px;overflow-y:auto;':''}overflow-x:auto"><table style="font-size:12px"><thead${isBC?' style="position:sticky;top:0;z-index:4"':''}>`;
 h+=`<tr><th rowspan="2" style="${cs}width:32px;text-align:center;background:#FEEDE4">STT</th><th rowspan="2" style="${cs}min-width:130px;background:#FEEDE4">${hLabel}</th>`;
@@ -1243,20 +1253,18 @@ h+=`<tr class="tot"><td style="${cs}"></td><td style="${cs}font-weight:800;white
 selWeeks.forEach((w,wi)=>{labels.forEach((_,si)=>{const fd=fdWk(sheetArr[si],w);const red=fd!==null&&fd>=15;h+=`<td style="${cs}text-align:center;border-left:${si===0?'3px solid #D1D5DB':'1px solid #E5E7EB'};background:#FFE0CC;font-weight:800;color:${red?'#DC2626':'inherit'}">${fd!==null?fd.toFixed(1)+'%':'—'}</td>`;});});
 h+='</tr>';
 h+='</tbody></table></div>';
-if(selWeeks.length===2){
-  const w1=selWeeks[0],w2=selWeeks[1];const grandKey=grands[0];
-  if(grandKey){
-  h+=`<div class="analysis-box">📆 <strong>So sánh Tuần ${w1} → Tuần ${w2}:</strong><div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">`;
+if(selWeeks.length>=2){
+  const w1=selWeeks[selWeeks.length-2],w2=selWeeks[selWeeks.length-1];
+  const cards=[];
   labels.forEach((l,si)=>{
-    const fd1=wMap[si]?.[grandKey]?.[w1]??null;const fd2=wMap[si]?.[grandKey]?.[w2]??null;
-    if(fd1!==null&&fd2!==null){
-    const diff=fd2-fd1;const isUp=diff>0;
-    const color=isUp?'var(--red)':'var(--green)';const arrow=isUp?'▲':'▼';
-    h+=`<div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:8px 12px;min-width:110px;text-align:center"><div style="font-size:11px;font-weight:600;color:var(--text-sub);margin-bottom:4px">${l}</div><div style="font-size:14px;font-weight:700;color:${color}">${arrow} ${Math.abs(diff).toFixed(1)}%</div><div style="font-size:10px;color:var(--text-sub)">T${w1}: ${fd1.toFixed(1)}% → T${w2}: ${fd2.toFixed(1)}%</div></div>`;
-    }
+    const fd1=fdWk(sheetArr[si],w1),fd2=fdWk(sheetArr[si],w2);
+    if(fd1==null||fd2==null)return;
+    const diff=fd2-fd1;const isUp=diff>0.0005;const isDown=diff<-0.0005;
+    const color=isUp?'var(--red)':isDown?'var(--green)':'var(--text-sub)';
+    const arrow=isUp?'▲':isDown?'▼':'—';
+    cards.push(`<div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:8px 12px;min-width:110px;text-align:center"><div style="font-size:11px;font-weight:600;color:var(--text-sub);margin-bottom:4px">${l}</div><div style="font-size:14px;font-weight:700;color:${color}">${arrow} ${Math.abs(diff).toFixed(1)}%</div><div style="font-size:10px;color:var(--text-sub)">T${w1}: ${fd1.toFixed(1)}% → T${w2}: ${fd2.toFixed(1)}%</div></div>`);
   });
-  h+=`</div></div>`;
-  }
+  if(cards.length)h+=`<div class="analysis-box">📆 <strong>So sánh Tuần ${w1} → Tuần ${w2}:</strong><div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">${cards.join('')}</div></div>`;
 }
 return h;
 }
