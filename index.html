@@ -1230,16 +1230,18 @@ const fdWk=(sheet,w)=>{
   return vol>0?tra/vol*100:null;
 };
 const cs='padding:6px 9px;';
+// Cột tuần mới nhất bên trái, giống bảng FD ngày. selWeeks vẫn tăng dần để xếp hạng và so sánh đúng chiều cũ → mới.
+const showWeeks=[...selWeeks].reverse();
 let h=`<div class="table-wrap" style="${isBC?'max-height:1100px;overflow-y:auto;':''}overflow-x:auto"><table style="font-size:12px"><thead${isBC?' style="position:sticky;top:0;z-index:4"':''}>`;
 h+=`<tr><th rowspan="2" style="${cs}width:32px;text-align:center;background:#FEEDE4">STT</th><th rowspan="2" style="${cs}min-width:130px;background:#FEEDE4">${hLabel}</th>`;
-selWeeks.forEach((w,wi)=>{const bg=WC[wi%WC.length];h+=`<th colspan="${labels.length}" style="${cs}text-align:center;border-left:3px solid #D1D5DB;background:${bg}"><strong>Tuần ${w}</strong></th>`;});
+showWeeks.forEach((w,wi)=>{const bg=WC[wi%WC.length];h+=`<th colspan="${labels.length}" style="${cs}text-align:center;border-left:3px solid #D1D5DB;background:${bg}"><strong>Tuần ${w}</strong></th>`;});
 h+='</tr><tr>';
-selWeeks.forEach((w,wi)=>{const bg=WC[wi%WC.length];labels.forEach(l=>{h+=`<th style="${cs}text-align:center;border-left:1px solid #E5E7EB;background:${bg}">%FD<br><small style="font-weight:400;font-size:10px">${l}</small></th>`;});});
+showWeeks.forEach((w,wi)=>{const bg=WC[wi%WC.length];labels.forEach(l=>{h+=`<th style="${cs}text-align:center;border-left:1px solid #E5E7EB;background:${bg}">%FD<br><small style="font-weight:400;font-size:10px">${l}</small></th>`;});});
 h+='</tr></thead><tbody>';
 names.forEach((name,i)=>{
   const isG=isGrand(name);
   h+=`<tr${isG?' class="tot"':''}><td style="${cs}text-align:center;color:var(--text-sub);font-size:11px">${isG?'':i+1}</td><td style="${cs}font-weight:${isG?800:600};white-space:nowrap">${name}${isBC&&!isG?bcUnstableBadge(name):''}</td>`;
-  selWeeks.forEach((w,wi)=>{
+  showWeeks.forEach((w,wi)=>{
   const bg=WC[wi%WC.length];
   labels.forEach((_,si)=>{
     const fd=wMap[si]?.[name]?.[w]??null;const red=fd!==null&&fd>=15;
@@ -1250,7 +1252,7 @@ names.forEach((name,i)=>{
 });
 // Dòng TỔNG — Σ Trả Total / Σ %Vol (theo từng tuần & từng loại hàng)
 h+=`<tr class="tot"><td style="${cs}"></td><td style="${cs}font-weight:800;white-space:nowrap">TỔNG (Σ Trả / Σ %Vol)</td>`;
-selWeeks.forEach((w,wi)=>{labels.forEach((_,si)=>{const fd=fdWk(sheetArr[si],w);const red=fd!==null&&fd>=15;h+=`<td style="${cs}text-align:center;border-left:${si===0?'3px solid #D1D5DB':'1px solid #E5E7EB'};background:#FFE0CC;font-weight:800;color:${red?'#DC2626':'inherit'}">${fd!==null?fd.toFixed(1)+'%':'—'}</td>`;});});
+showWeeks.forEach((w,wi)=>{labels.forEach((_,si)=>{const fd=fdWk(sheetArr[si],w);const red=fd!==null&&fd>=15;h+=`<td style="${cs}text-align:center;border-left:${si===0?'3px solid #D1D5DB':'1px solid #E5E7EB'};background:#FFE0CC;font-weight:800;color:${red?'#DC2626':'inherit'}">${fd!==null?fd.toFixed(1)+'%':'—'}</td>`;});});
 h+='</tr>';
 h+='</tbody></table></div>';
 if(selWeeks.length>=2){
